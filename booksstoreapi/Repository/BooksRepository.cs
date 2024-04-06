@@ -1,6 +1,7 @@
 ﻿using booksstoreapi.Interface;
 using booksstoreapi.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using System;
 
@@ -29,8 +30,8 @@ namespace booksstoreapi.Repository
         }
 
         [HttpGet]
-        [Route("GetBookBySort")]
-        public async Task<List<Booksstore>?> GetBooksBySorts(string? sortbooks)
+        [Route("GetBookSortBy")]
+        public async Task<List<Booksstore>?> GetBooksBy(string? sortbooks)
         {
             if (_dbContext.Booksstores == null)
             {
@@ -57,6 +58,54 @@ namespace booksstoreapi.Repository
         }
 
         [HttpGet]
+        [Route("GetBookByParam")]
+        public async Task<List<Booksstore>?> GetBooksBy(string? Sort, int pageNumber=1,int pageSize=20)
+        {
+            if (_dbContext.Booksstores == null)
+            {
+                return null;
+            }
+            var books =await _dbContext.Booksstores.ToListAsync();
+            var sort = !string.IsNullOrEmpty(Sort) ? Sort.ToLower().Trim() : null;
+            books = sort switch
+            {
+                // step 2 don't have publisher sort So I used same API
+                "publisher" => books.OrderByDescending(x => x.Publisher).ToList(),
+                "authorlastname" => books.OrderByDescending(x => x.AuthorLastName).ToList(),
+                "authorfirstname" => books.OrderByDescending(x => x.AuthorFirstName).ToList(),
+                "title" => books.OrderByDescending(x => x.Title).ToList(),
+                _ => books.ToList(),
+            };
+            //apply pagination
+
+            // totalCount=101, page=1, limit=10(10 record per page)
+            int totalRecords = books.Count();
+
+            // 101/10=10.1->11
+            var totalpage=Math.Ceiling(Convert.ToDecimal(totalRecords / pageSize));
+
+            // page=1,skip(1-1)*10=0, taken=10
+            var pageBooks = books.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToList();
+
+            return pageBooks;
+        }
+
+        //storeprocedure call
+        [HttpPost]
+        [Route("GetBooksRecordByStoredProcedure")]
+        public async Task<ActionResult<IEnumerable<Booksstore>>> GetBooksoutput(BooksViewModel booksViewModel)
+        {
+            string StoredProc = "exec [dbo].[getbooks] " +
+           "@@PageNumber = " + booksViewModel.CurrentPage + "," +
+           "@PageSize = '" + booksViewModel.PageSize + "'," +
+           "@SortColumn= '" + booksViewModel.Sort + "'," +
+           "@SortOrder= '" + booksViewModel.OrderBy + "',";
+
+            //return await _dbContext.Booksstores.ToListAsync();
+            return await _dbContext.Booksstores.FromSqlRaw(StoredProc).ToListAsync();
+        }
+
+            [HttpGet]
         [Route("GetTotalBooksAmount")]
         public decimal GetAllbookTotalPrice()
         {
@@ -67,23 +116,13 @@ namespace booksstoreapi.Repository
         [Route("InsertMoreRecord")]
         public string InsertMorerecord(List<Booksstore> booksstores)
         {
-            using (var insertContext =_dbContext)
+            using var insertContext = _dbContext;
+            if (booksstores.Count > 0)
             {
-                foreach (Booksstore data in booksstores)
-                {
-                    if (data == null)
-                        continue;
-
-                    Booksstore book = new()
-                    {
-                        Publisher = data.Publisher,
-                        AuthorFirstName = data.AuthorFirstName,
-                        AuthorLastName = data.AuthorLastName,
-                    };
-                    insertContext.Booksstores.Add(book);
-                }
-                int savedData = insertContext.SaveChanges();
+                insertContext.Booksstores.AddRange(booksstores);
             }
+
+            _ = insertContext.SaveChanges();
             return "Successfully Inserted";
         }
 
